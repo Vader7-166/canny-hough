@@ -1,0 +1,83 @@
+{
+  "config": {
+    "target_width": 960,
+    "target_height": 540,
+    "white_saturation_max": 80,
+    "white_value_min": 170,
+    "yellow_hue_min": 15,
+    "yellow_hue_max": 40,
+    "yellow_saturation_min": 70,
+    "yellow_value_min": 90,
+    "gaussian_radius": 1.2
+  },
+  "base_paper": "Belhadri et al. (2026), Lane Boundary Detection in Dynamic Environments",
+  "proposed_variant": "Replace direct RGB-to-grayscale conversion with RGB-to-HSV white/yellow lane-color filtering before Gaussian and Canny.",
+  "dataset_label_warning": "Existing ground truth labels drivable road area, not lane markings; it is not used to score lane-boundary accuracy here.",
+  "interpretation": {
+    "retained_pixel_ratio": "Tỷ lệ pixel trắng/vàng được giữ trên toàn ảnh.",
+    "white_pixel_ratio": "Tỷ lệ pixel thỏa ngưỡng vạch trắng.",
+    "yellow_pixel_ratio": "Tỷ lệ pixel thỏa ngưỡng vạch vàng.",
+    "high_frequency_reduction": "Mức giảm biến thiên cục bộ sau Gaussian."
+  },
+  "representative_samples": [
+    {
+      "group": "normal",
+      "image": "normal_12",
+      "retained_pixel_ratio": 0.10173418209876543,
+      "white_pixel_ratio": 0.10087384259259259,
+      "yellow_pixel_ratio": 0.0009278549382716049,
+      "high_frequency_before": 2.3499484062194824,
+      "high_frequency_after": 1.5389034748077393,
+      "high_frequency_reduction": 0.34513308005622334
+    },
+    {
+      "group": "curved",
+      "image": "curved_09",
+      "retained_pixel_ratio": 0.18884837962962964,
+      "white_pixel_ratio": 0.09543016975308642,
+      "yellow_pixel_ratio": 0.10378472222222222,
+      "high_frequency_before": 7.069100379943848,
+      "high_frequency_after": 3.698498487472534,
+      "high_frequency_reduction": 0.4768077564769405
+    },
+    {
+      "group": "adverse",
+      "image": "adverse_03",
+      "retained_pixel_ratio": 0.08375192901234568,
+      "white_pixel_ratio": 0.08192515432098765,
+      "yellow_pixel_ratio": 0.002019675925925926,
+      "high_frequency_before": 1.3831274509429932,
+      "high_frequency_after": 0.844889760017395,
+      "high_frequency_reduction": 0.38914540417706023
+    }
+  ],
+  "group_mean": {
+    "normal": {
+      "retained_pixel_ratio": 0.15146304869684502,
+      "white_pixel_ratio": 0.14095764746227707,
+      "yellow_pixel_ratio": 0.011276791838134433,
+      "high_frequency_before": 3.9547754526138306,
+      "high_frequency_after": 2.1749005019664764,
+      "high_frequency_reduction": 0.4356493176233287,
+      "count": 18
+    },
+    "curved": {
+      "retained_pixel_ratio": 0.2139576903292181,
+      "white_pixel_ratio": 0.19179848251028808,
+      "yellow_pixel_ratio": 0.024481256430041152,
+      "high_frequency_before": 3.328965629140536,
+      "high_frequency_after": 1.9091971268256505,
+      "high_frequency_reduction": 0.38703276354661414,
+      "count": 12
+    },
+    "adverse": {
+      "retained_pixel_ratio": 0.10465075231481484,
+      "white_pixel_ratio": 0.0932709297839506,
+      "yellow_pixel_ratio": 0.01207301311728395,
+      "high_frequency_before": 2.889699326455593,
+      "high_frequency_after": 1.651751422509551,
+      "high_frequency_reduction": 0.404827334526102,
+      "count": 20
+    }
+  }
+}

@@ -1,0 +1,268 @@
+{
+  "processed_images": 50,
+  "config": {
+    "target_width": 960,
+    "target_height": 540,
+    "white_saturation_max": 80,
+    "white_value_min": 170,
+    "yellow_hue_min": 15,
+    "yellow_hue_max": 40,
+    "yellow_saturation_min": 70,
+    "yellow_value_min": 90,
+    "gaussian_radius": 1.2
+  },
+  "method": "Proposed Belhadri et al. (2026) variant: RGB-to-HSV white/yellow lane-color filtering before Gaussian; output stops before Canny.",
+  "handoff": "Use canny_input/*.png as the input of the separate Canny module.",
+  "files": [
+    {
+      "source": "adverse/adverse_01.jpg",
+      "output": "canny_input/adverse/adverse_01.png",
+      "retained_pixel_ratio": 0.038675
+    },
+    {
+      "source": "adverse/adverse_02.jpg",
+      "output": "canny_input/adverse/adverse_02.png",
+      "retained_pixel_ratio": 0.178912
+    },
+    {
+      "source": "adverse/adverse_03.jpg",
+      "output": "canny_input/adverse/adverse_03.png",
+      "retained_pixel_ratio": 0.083752
+    },
+    {
+      "source": "adverse/adverse_04.jpg",
+      "output": "canny_input/adverse/adverse_04.png",
+      "retained_pixel_ratio": 0.157716
+    },
+    {
+      "source": "adverse/adverse_05.jpg",
+      "output": "canny_input/adverse/adverse_05.png",
+      "retained_pixel_ratio": 0.096956
+    },
+    {
+      "source": "adverse/adverse_06.jpg",
+      "output": "canny_input/adverse/adverse_06.png",
+      "retained_pixel_ratio": 0.056973
+    },
+    {
+      "source": "adverse/adverse_07.jpg",
+      "output": "canny_input/adverse/adverse_07.png",
+      "retained_pixel_ratio": 0.054196
+    },
+    {
+      "source": "adverse/adverse_08.jpg",
+      "output": "canny_input/adverse/adverse_08.png",
+      "retained_pixel_ratio": 0.215515
+    },
+    {
+      "source": "adverse/adverse_09.jpg",
+      "output": "canny_input/adverse/adverse_09.png",
+      "retained_pixel_ratio": 0.144888
+    },
+    {
+      "source": "adverse/adverse_10.jpg",
+      "output": "canny_input/adverse/adverse_10.png",
+      "retained_pixel_ratio": 0.17755
+    },
+    {
+      "source": "adverse/adverse_11.jpg",
+      "output": "canny_input/adverse/adverse_11.png",
+      "retained_pixel_ratio": 0.063704
+    },
+    {
+      "source": "adverse/adverse_12.jpg",
+      "output": "canny_input/adverse/adverse_12.png",
+      "retained_pixel_ratio": 0.215856
+    },
+    {
+      "source": "adverse/adverse_13.jpg",
+      "output": "canny_input/adverse/adverse_13.png",
+      "retained_pixel_ratio": 0.170284
+    },
+    {
+      "source": "adverse/adverse_14.jpg",
+      "output": "canny_input/adverse/adverse_14.png",
+      "retained_pixel_ratio": 0.197025
+    },
+    {
+      "source": "adverse/adverse_15.jpg",
+      "output": "canny_input/adverse/adverse_15.png",
+      "retained_pixel_ratio": 0.054732
+    },
+    {
+      "source": "adverse/adverse_16.jpg",
+      "output": "canny_input/adverse/adverse_16.png",
+      "retained_pixel_ratio": 0.043584
+    },
+    {
+      "source": "adverse/adverse_17.jpg",
+      "output": "canny_input/adverse/adverse_17.png",
+      "retained_pixel_ratio": 0.003214
+    },
+    {
+      "source": "adverse/adverse_18.jpg",
+      "output": "canny_input/adverse/adverse_18.png",
+      "retained_pixel_ratio": 0.048065
+    },
+    {
+      "source": "adverse/adverse_19.jpg",
+      "output": "canny_input/adverse/adverse_19.png",
+      "retained_pixel_ratio": 0.020451
+    },
+    {
+      "source": "adverse/adverse_20.jpg",
+      "output": "canny_input/adverse/adverse_20.png",
+      "retained_pixel_ratio": 0.070966
+    },
+    {
+      "source": "curved/curved_01.jpg",
+      "output": "canny_input/curved/curved_01.png",
+      "retained_pixel_ratio": 0.297203
+    },
+    {
+      "source": "curved/curved_02.jpg",
+      "output": "canny_input/curved/curved_02.png",
+      "retained_pixel_ratio": 0.3699
+    },
+    {
+      "source": "curved/curved_03.jpg",
+      "output": "canny_input/curved/curved_03.png",
+      "retained_pixel_ratio": 0.016649
+    },
+    {
+      "source": "curved/curved_04.jpg",
+      "output": "canny_input/curved/curved_04.png",
+      "retained_pixel_ratio": 0.488941
+    },
+    {
+      "source": "curved/curved_05.jpg",
+      "output": "canny_input/curved/curved_05.png",
+      "retained_pixel_ratio": 0.042851
+    },
+    {
+      "source": "curved/curved_06.jpg",
+      "output": "canny_input/curved/curved_06.png",
+      "retained_pixel_ratio": 0.01158
+    },
+    {
+      "source": "curved/curved_07.jpg",
+      "output": "canny_input/curved/curved_07.png",
+      "retained_pixel_ratio": 0.301721
+    },
+    {
+      "source": "curved/curved_08.jpg",
+      "output": "canny_input/curved/curved_08.png",
+      "retained_pixel_ratio": 0.316914
+    },
+    {
+      "source": "curved/curved_09.jpg",
+      "output": "canny_input/curved/curved_09.png",
+      "retained_pixel_ratio": 0.188848
+    },
+    {
+      "source": "curved/curved_10.jpg",
+      "output": "canny_input/curved/curved_10.png",
+      "retained_pixel_ratio": 0.251053
+    },
+    {
+      "source": "curved/curved_11.jpg",
+      "output": "canny_input/curved/curved_11.png",
+      "retained_pixel_ratio": 0.132353
+    },
+    {
+      "source": "curved/curved_12.jpg",
+      "output": "canny_input/curved/curved_12.png",
+      "retained_pixel_ratio": 0.149479
+    },
+    {
+      "source": "normal/normal_01.jpg",
+      "output": "canny_input/normal/normal_01.png",
+      "retained_pixel_ratio": 0.212427
+    },
+    {
+      "source": "normal/normal_02.jpg",
+      "output": "canny_input/normal/normal_02.png",
+      "retained_pixel_ratio": 0.108611
+    },
+    {
+      "source": "normal/normal_03.jpg",
+      "output": "canny_input/normal/normal_03.png",
+      "retained_pixel_ratio": 0.241858
+    },
+    {
+      "source": "normal/normal_04.jpg",
+      "output": "canny_input/normal/normal_04.png",
+      "retained_pixel_ratio": 0.201493
+    },
+    {
+      "source": "normal/normal_05.jpg",
+      "output": "canny_input/normal/normal_05.png",
+      "retained_pixel_ratio": 0.043179
+    },
+    {
+      "source": "normal/normal_06.jpg",
+      "output": "canny_input/normal/normal_06.png",
+      "retained_pixel_ratio": 0.025058
+    },
+    {
+      "source": "normal/normal_07.jpg",
+      "output": "canny_input/normal/normal_07.png",
+      "retained_pixel_ratio": 0.139182
+    },
+    {
+      "source": "normal/normal_08.jpg",
+      "output": "canny_input/normal/normal_08.png",
+      "retained_pixel_ratio": 0.371528
+    },
+    {
+      "source": "normal/normal_09.jpg",
+      "output": "canny_input/normal/normal_09.png",
+      "retained_pixel_ratio": 0.271802
+    },
+    {
+      "source": "normal/normal_10.jpg",
+      "output": "canny_input/normal/normal_10.png",
+      "retained_pixel_ratio": 0.162849
+    },
+    {
+      "source": "normal/normal_11.jpg",
+      "output": "canny_input/normal/normal_11.png",
+      "retained_pixel_ratio": 0.091937
+    },
+    {
+      "source": "normal/normal_12.jpg",
+      "output": "canny_input/normal/normal_12.png",
+      "retained_pixel_ratio": 0.101734
+    },
+    {
+      "source": "normal/normal_13.jpg",
+      "output": "canny_input/normal/normal_13.png",
+      "retained_pixel_ratio": 0.048395
+    },
+    {
+      "source": "normal/normal_14.jpg",
+      "output": "canny_input/normal/normal_14.png",
+      "retained_pixel_ratio": 0.178619
+    },
+    {
+      "source": "normal/normal_15.jpg",
+      "output": "canny_input/normal/normal_15.png",
+      "retained_pixel_ratio": 0.224759
+    },
+    {
+      "source": "normal/normal_16.jpg",
+      "output": "canny_input/normal/normal_16.png",
+      "retained_pixel_ratio": 0.098171
+    },
+    {
+      "source": "normal/normal_17.jpg",
+      "output": "canny_input/normal/normal_17.png",
+      "retained_pixel_ratio": 0.115974
+    },
+    {
+      "source": "normal/normal_18.jpg",
+      "output": "canny_input/normal/normal_18.png",
+      "retained_pixel_ratio": 0.08876
+    }
+  ]
+}
