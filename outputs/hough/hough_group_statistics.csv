@@ -1,0 +1,5 @@
+group,count,mean_raw_lines,left_detect_pct,right_detect_pct,both_detect_pct,mean_iou_all,mean_iou_successful,mean_mae_successful,mean_runtime_ms
+normal,18,57.3,72.2,66.7,50.0,0.1497,0.2994,213.7,8.72
+curved,12,51.2,66.7,75.0,50.0,0.1904,0.3809,177.2,7.74
+adverse,20,38.2,80.0,75.0,60.0,0.1754,0.2923,279.67,6.87
+all,50,48.2,74.0,72.0,54.0,0.1698,0.3144,234.91,7.75

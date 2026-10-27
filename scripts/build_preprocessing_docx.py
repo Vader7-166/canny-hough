@@ -10,8 +10,54 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
+try:
+    from latex2mathml.converter import convert as latex2mathml_convert
+    from lxml import etree
+    _HAS_MATH = True
+except ImportError:
+    _HAS_MATH = False
 
-ROOT = Path(__file__).resolve().parents[1]
+XSL_PATHS = [
+    Path(r"C:\Program Files\Microsoft Office\root\Office16\MML2OMML.XSL"),
+    Path(r"C:\Program Files (x86)\Microsoft Office\root\Office16\MML2OMML.XSL"),
+]
+_OMML_TRANSFORM = None
+if _HAS_MATH:
+    for p in XSL_PATHS:
+        if p.is_file():
+            try:
+                _OMML_TRANSFORM = etree.XSLT(etree.parse(str(p)))
+                break
+            except Exception:
+                pass
+
+
+def append_math_to_paragraph(paragraph, latex: str, display: bool = False) -> bool:
+    if _OMML_TRANSFORM is None:
+        return False
+    try:
+        clean_latex = latex.strip()
+        mathml = latex2mathml_convert(clean_latex)
+        dom = etree.fromstring(mathml)
+        omml = _OMML_TRANSFORM(dom)
+        root = omml.getroot()
+        if display:
+            omath_para = etree.Element('{http://schemas.openxmlformats.org/officeDocument/2006/math}oMathPara')
+            omath_para.append(root)
+            paragraph._p.append(omath_para)
+        else:
+            paragraph._p.append(root)
+        return True
+    except Exception:
+        return False
+def _find_repo_root() -> Path:
+    cur = Path(__file__).resolve()
+    for parent in cur.parents:
+        if (parent / "dataset").is_dir():
+            return parent
+    return cur.parents[2]
+
+ROOT = _find_repo_root()
 SOURCE = ROOT / "Bao_cao_Phan_2_Tien_xu_ly_HSV.md"
 OUTPUT = ROOT / "Bao_cao_Phan_2_Tien_xu_ly_HSV.docx"
 
@@ -90,7 +136,7 @@ def apply_font(run, *, size=None, bold=None, italic=None, color=None, name=BODY_
         run.font.color.rgb = color
 
 
-INLINE_PATTERN = re.compile(r"(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)")
+INLINE_PATTERN = re.compile(r"(\$[^$]+\$|\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)")
 
 
 def add_inline_runs(paragraph, text: str) -> None:
@@ -99,7 +145,11 @@ def add_inline_runs(paragraph, text: str) -> None:
         if match.start() > position:
             apply_font(paragraph.add_run(text[position : match.start()]), size=BODY_SIZE, color=TEXT_COLOR)
         token = match.group(0)
-        if token.startswith("**"):
+        if token.startswith("$") and token.endswith("$"):
+            math_text = token[1:-1].strip()
+            if not append_math_to_paragraph(paragraph, math_text, display=False):
+                apply_font(paragraph.add_run(token), size=BODY_SIZE, italic=True, color=TEXT_COLOR)
+        elif token.startswith("**"):
             apply_font(paragraph.add_run(token[2:-2]), size=BODY_SIZE, bold=True, color=TEXT_COLOR)
         elif token.startswith("`"):
             apply_font(
@@ -281,6 +331,29 @@ def parse_markdown(document: Document, text: str) -> None:
             flush_paragraph()
             document.add_heading(line[4:].strip(), level=2)
             index += 1
+            continue
+
+        if line.startswith("$$"):
+            flush_paragraph()
+            if line.endswith("$$") and len(line) > 4:
+                eq_text = line[2:-2].strip()
+                index += 1
+            else:
+                index += 1
+                eq_parts = []
+                while index < len(lines) and not lines[index].strip().startswith("$$"):
+                    eq_parts.append(lines[index].strip())
+                    index += 1
+                if index < len(lines):
+                    index += 1
+                eq_text = " ".join(eq_parts)
+
+            eq_p = document.add_paragraph()
+            eq_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            eq_p.paragraph_format.space_before = Pt(4)
+            eq_p.paragraph_format.space_after = Pt(6)
+            if not append_math_to_paragraph(eq_p, eq_text, display=True):
+                apply_font(eq_p.add_run(eq_text), size=Pt(11.5), italic=True, color=TEXT_COLOR)
             continue
 
         if line.startswith("!["):
