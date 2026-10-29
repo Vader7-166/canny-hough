@@ -7,7 +7,7 @@ phan cum trai/phai va hoi quy tuyen tinh co trong so de xac dinh hai bien duong.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Literal
 
 import cv2
 import numpy as np
@@ -35,11 +35,25 @@ class HoughConfig:
     min_abs_slope: float = 0.30            # Loai bo cac duong qua nam ngang (~17 do)
     max_abs_slope: float = 4.00            # Loai bo cac duong gan nhu thang dung (~76 do)
 
+    # Dung sai vuong goc khi chon cum dong thuan, ty le theo be rong anh.
+    fit_distance_ratio: float = 0.02
+
     def __post_init__(self) -> None:
+        values = np.array(list(self.__dict__.values()), dtype=float)
+        if not np.all(np.isfinite(values)):
+            raise ValueError("Tham so Hough phai huu han")
         if not (0.0 < self.roi_top_y_ratio < self.roi_bottom_y_ratio <= 1.0):
             raise ValueError("roi_top_y_ratio va roi_bottom_y_ratio khong hop le")
-        if self.min_abs_slope >= self.max_abs_slope:
-            raise ValueError("min_abs_slope phai nho hon max_abs_slope")
+        if not (0.0 < self.roi_top_width_ratio <= self.roi_bottom_width_ratio <= 1.0):
+            raise ValueError("Be rong ROI phai thoa 0 < top <= bottom <= 1")
+        if not (0.0 < self.min_abs_slope < self.max_abs_slope):
+            raise ValueError("Do doc phai thoa 0 < min < max")
+        if self.rho <= 0 or not (0 < self.theta <= np.pi) or self.threshold <= 0:
+            raise ValueError("rho, theta va threshold khong hop le")
+        if self.min_line_length <= 0 or self.max_line_gap < 0:
+            raise ValueError("Chieu dai phai duong, khoang dut doan khong am")
+        if not (0 < self.fit_distance_ratio < 1):
+            raise ValueError("fit_distance_ratio phai nam trong (0, 1)")
 
 
 @dataclass(frozen=True)
@@ -50,16 +64,18 @@ class HoughResult:
     right_line: tuple[tuple[int, int], tuple[int, int]] | None   # ((x_bottom, y_bottom), (x_top, y_top))
     polygon: np.ndarray | None                                   # Toa do da giac (4, 2) mat duong giua 2 bien
     raw_lines: np.ndarray                                        # Mang tat ca doan thang HoughLinesP tim thay (N, 4)
-    left_segments: np.ndarray                                    # Tap cac doan thang thuoc bien trai (K, 4)
-    right_segments: np.ndarray                                   # Tap cac doan thang thuoc bien phai (M, 4)
+    left_segments: np.ndarray                                    # Ung vien trai sau loc slope; fit chi dung inlier (K, 4)
+    right_segments: np.ndarray                                   # Ung vien phai sau loc slope; fit chi dung inlier (M, 4)
     roi_mask: np.ndarray                                         # Mat na ROI da giac (H, W)
 
 
 def get_trapezoid_vertices(height: int, width: int, config: HoughConfig) -> np.ndarray:
     """Tinh toa do 4 dinh cua ROI hinh thang can doi qua truc giua."""
+    if height < 2 or width < 2:
+        raise ValueError("Anh phai co it nhat 2 hang va 2 cot")
     center_x = width / 2.0
-    top_y = int(height * config.roi_top_y_ratio)
-    bottom_y = int(height * config.roi_bottom_y_ratio)
+    top_y = min(height - 1, int(height * config.roi_top_y_ratio))
+    bottom_y = min(height - 1, int(height * config.roi_bottom_y_ratio))
 
     half_top_w = (width * config.roi_top_width_ratio) / 2.0
     half_bottom_w = (width * config.roi_bottom_width_ratio) / 2.0
@@ -173,79 +189,120 @@ def fit_boundary_line(
     segments: np.ndarray,
     y_bottom: int,
     y_top: int,
+    *,
+    side: Literal["left", "right"],
+    width: int,
+    config: HoughConfig,
 ) -> tuple[tuple[int, int], tuple[int, int]] | None:
-    """Hoi quy tuyen tinh co trong so (Weighted Least Squares) de tim duong bien dai dien.
+    """Chon cum dong thuan tat dinh roi WLS x(y), khong tron moi doan cung dau.
 
-    Giai quyet tinh don le cua do doc bang cach hoi quy x theo y: x = k * y + b.
-    Vi y nam trong doan huu han [y_top, y_bottom], dao ham dx / dy luon xac dinh tot
-    ngay ca khi duong bien gan nhu thang dung.
-
-    Trong so w_i la chieu dai doan do doan thang Hough tao ra: w_i = sqrt(dx^2 + dy^2).
-    Tra ve ((x_bottom, y_bottom), (x_top, y_top)) hoac None neu khong the fit.
+    Moi doan de xuat mot mo hinh. Ca hai dau mut cua inlier phai cach mo
+    hinh khong qua fit_distance_ratio * width pixel (khoang cach vuong goc).
+    Chon tong chieu dai inlier lon nhat, hoa thi chon sai so nho nhat.
     """
-    if len(segments) == 0:
+    if side not in ("left", "right"):
+        raise ValueError("side phai la left hoac right")
+    if y_bottom <= y_top or width < 2:
         return None
-
-    # Tinh chieu dai moi doan
-    dx = segments[:, 2] - segments[:, 0]
-    dy = segments[:, 3] - segments[:, 1]
-    lengths = np.hypot(dx, dy)
-
-    # Bo qua cac doan co chieu dai bang 0
-    valid = lengths > 1e-3
-    if not np.any(valid):
+    data = np.asarray(segments, dtype=np.float64).reshape(-1, 4)
+    if len(data) == 0:
         return None
-
-    valid_segments = segments[valid]
-    weights = lengths[valid]
-
-    # Moi doan thang gop 2 diem (x1, y1) va (x2, y2) voi cung trong so weight
-    x_coords = np.concatenate([valid_segments[:, 0], valid_segments[:, 2]])
-    y_coords = np.concatenate([valid_segments[:, 1], valid_segments[:, 3]])
-    w = np.concatenate([weights, weights])
-
-    total_w = np.sum(w)
-    if total_w <= 0:
+    dx = data[:, 2] - data[:, 0]
+    dy = data[:, 3] - data[:, 1]
+    slopes = np.divide(dy, dx, out=np.zeros_like(dy), where=dx != 0)
+    valid = (
+        np.all(np.isfinite(data), axis=1)
+        & (dx != 0) & (dy != 0)
+        & (np.abs(slopes) >= config.min_abs_slope)
+        & (np.abs(slopes) <= config.max_abs_slope)
+        & ((slopes < 0) if side == "left" else (slopes > 0))
+    )
+    data = data[valid]
+    if len(data) == 0:
         return None
+    lengths = np.hypot(data[:, 2] - data[:, 0], data[:, 3] - data[:, 1])
+    # Sap xep de hoa diem khong phu thuoc thu tu cac doan Hough.
+    order = np.lexsort(data.T[::-1])
+    data, lengths = data[order], lengths[order]
+    best_score = (-1.0, -np.inf)
+    best_inliers = np.zeros(len(data), dtype=bool)
+    for x1, y1, x2, y2 in data:
+        k = (x2 - x1) / (y2 - y1)
+        b = x1 - k * y1
+        residuals = np.maximum(
+            np.abs(data[:, 0] - k * data[:, 1] - b),
+            np.abs(data[:, 2] - k * data[:, 3] - b),
+        ) / np.hypot(1.0, k)
+        inliers = residuals <= config.fit_distance_ratio * width
+        support = float(lengths[inliers].sum())
+        error = float(np.average(residuals[inliers], weights=lengths[inliers]))
+        score = (support, -error)
+        if score > best_score:
+            best_score, best_inliers = score, inliers
 
-    mean_y = np.sum(w * y_coords) / total_w
-    mean_x = np.sum(w * x_coords) / total_w
-
-    var_y = np.sum(w * (y_coords - mean_y) ** 2)
-    cov_xy = np.sum(w * (y_coords - mean_y) * (x_coords - mean_x))
-
+    selected = data[best_inliers]
+    weights = np.tile(lengths[best_inliers], 2)
+    x_coords = np.concatenate((selected[:, 0], selected[:, 2]))
+    y_coords = np.concatenate((selected[:, 1], selected[:, 3]))
+    mean_y = np.average(y_coords, weights=weights)
+    mean_x = np.average(x_coords, weights=weights)
+    var_y = np.sum(weights * (y_coords - mean_y) ** 2)
     if var_y < 1e-5:
         return None
-
-    k = cov_xy / var_y
+    k = np.sum(weights * (y_coords - mean_y) * (x_coords - mean_x)) / var_y
+    if not np.isfinite(k) or k == 0:
+        return None
+    slope = 1.0 / k
+    if not (config.min_abs_slope <= abs(slope) <= config.max_abs_slope):
+        return None
+    if (side == "left" and k >= 0) or (side == "right" and k <= 0):
+        return None
     b = mean_x - k * mean_y
-
-    x_bottom = int(round(k * y_bottom + b))
-    x_top = int(round(k * y_top + b))
-
-    return ((x_bottom, y_bottom), (x_top, y_top))
+    return (
+        (int(round(k * y_bottom + b)), y_bottom),
+        (int(round(k * y_top + b)), y_top),
+    )
 
 
 def create_road_polygon(
     left_line: tuple[tuple[int, int], tuple[int, int]] | None,
     right_line: tuple[tuple[int, int], tuple[int, int]] | None,
 ) -> np.ndarray | None:
-    """Tao da giac 4 dinh bieu dien vung mat duong giua 2 bien trai va phai."""
+    """Tao vung chung hop le; chi giu phan nam duoi giao diem hai bien.
+
+    Khong ngoai suy qua mien y cua mot trong hai bien. Hai bien dao thu tu
+    tai day, khong co mien chung, hoac khong con dien tich thi tra ve None.
+    """
     if left_line is None or right_line is None:
         return None
+    if any(line[0][1] <= line[1][1] for line in (left_line, right_line)):
+        return None
 
-    (x_l_bot, y_l_bot), (x_l_top, y_l_top) = left_line
-    (x_r_bot, y_r_bot), (x_r_top, y_r_top) = right_line
+    def x_at(line, y):
+        (xb, yb), (xt, yt) = line
+        return xt + (xb - xt) * (y - yt) / (yb - yt)
 
-    polygon = np.array(
-        [
-            [x_l_bot, y_l_bot],
-            [x_l_top, y_l_top],
-            [x_r_top, y_r_top],
-            [x_r_bot, y_r_bot],
-        ],
-        dtype=np.int32,
-    )
+    y_bottom = min(left_line[0][1], right_line[0][1])
+    y_top = max(left_line[1][1], right_line[1][1])
+    if y_top >= y_bottom:
+        return None
+    gap_bottom = x_at(right_line, y_bottom) - x_at(left_line, y_bottom)
+    gap_top = x_at(right_line, y_top) - x_at(left_line, y_top)
+    if gap_bottom < 1:
+        return None
+    if gap_top < 1:
+        # Gap la ham bac nhat theo y. Giu it nhat 1 pixel o dinh.
+        y_top += int(np.ceil((1 - gap_top) * (y_bottom - y_top) / (gap_bottom - gap_top)))
+    if y_top >= y_bottom:
+        return None
+    polygon = np.array([
+        [round(x_at(left_line, y_bottom)), y_bottom],
+        [round(x_at(left_line, y_top)), y_top],
+        [round(x_at(right_line, y_top)), y_top],
+        [round(x_at(right_line, y_bottom)), y_bottom],
+    ], dtype=np.int32)
+    if polygon[0, 0] >= polygon[3, 0] or polygon[1, 0] >= polygon[2, 0]:
+        return None
     return polygon
 
 
@@ -255,6 +312,8 @@ def detect_road_boundaries(
 ) -> HoughResult:
     """Pipeline hoan chinh cua Phan 4: nhan anh canh Canny, tra ve 2 bien duong va da giac."""
     cfg = config or HoughConfig()
+    if edges.ndim != 2 or edges.dtype != np.uint8:
+        raise ValueError("Can anh canh uint8 mot kenh")
     height, width = edges.shape[:2]
 
     # 1. Tao va ap dung mat na ROI hinh thang
@@ -268,14 +327,30 @@ def detect_road_boundaries(
     left_segs, right_segs = split_left_right_segments(raw_lines, width, cfg)
 
     # 4. Hoi quy tuyen tinh co trong so de tim 2 duong bien
-    y_bottom = int(height * cfg.roi_bottom_y_ratio)
-    y_top = int(height * cfg.roi_top_y_ratio)
+    y_bottom = int(vertices[0, 0, 1])
+    y_top = int(vertices[0, 1, 1])
 
-    left_line = fit_boundary_line(left_segs, y_bottom, y_top)
-    right_line = fit_boundary_line(right_segs, y_bottom, y_top)
+    left_line = fit_boundary_line(
+        left_segs, y_bottom, y_top, side="left", width=width, config=cfg,
+    )
+    right_line = fit_boundary_line(
+        right_segs, y_bottom, y_top, side="right", width=width, config=cfg,
+    )
+
+    def clip_line(line):
+        if line is None:
+            return None
+        visible, bottom, top = cv2.clipLine((0, 0, width, height), *line)
+        return (bottom, top) if visible and bottom[1] > top[1] else None
+
+    left_line, right_line = clip_line(left_line), clip_line(right_line)
 
     # 5. Tao da giac vung duong giua 2 bien
     polygon = create_road_polygon(left_line, right_line)
+    if polygon is not None:
+        # Cung mien y, dung thu tu trai/phai, toa do trong khung anh.
+        left_line = (tuple(map(int, polygon[0])), tuple(map(int, polygon[1])))
+        right_line = (tuple(map(int, polygon[3])), tuple(map(int, polygon[2])))
 
     return HoughResult(
         left_line=left_line,
@@ -308,7 +383,7 @@ def draw_hough_visualization(
         contours, _ = cv2.findContours(result.roi_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(canvas, contours, -1, (255, 255, 0), 1, lineType=cv2.LINE_AA)
 
-    # Ve cac doan thang tho neu duoc yeu cau (doan trai mau xanh lam, doan phai mau do)
+    # Ve ung vien sau loc slope (RGB: trai do nhat, phai xanh lam nhat).
     if draw_raw_lines:
         for x1, y1, x2, y2 in result.left_segments:
             cv2.line(canvas, (x1, y1), (x2, y2), (255, 100, 100), 1, lineType=cv2.LINE_AA)
