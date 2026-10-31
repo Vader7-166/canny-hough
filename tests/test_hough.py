@@ -9,8 +9,6 @@ from hough import (
     HoughConfig,
     apply_roi,
     create_road_polygon,
-    detect_hough_lines_p,
-    detect_hough_lines_standard,
     detect_road_boundaries,
     fit_boundary_line,
     get_trapezoid_vertices,
@@ -116,7 +114,10 @@ class BoundaryLineFittingTests(unittest.TestCase):
         seg2 = np.array([310, 380, 350, 300], dtype=np.int32)
         segments = np.array([seg1, seg2], dtype=np.int32)
 
-        line = fit_boundary_line(segments, y_bottom=500, y_top=300)
+        line = fit_boundary_line(
+            segments, y_bottom=500, y_top=300,
+            side="left", width=960, config=HoughConfig(),
+        )
         self.assertIsNotNone(line)
         (x_bot, y_bot), (x_top, y_top) = line
 
@@ -127,8 +128,47 @@ class BoundaryLineFittingTests(unittest.TestCase):
 
     def test_fit_empty_segments_returns_none(self):
         segments = np.empty((0, 4), dtype=np.int32)
-        line = fit_boundary_line(segments, y_bottom=500, y_top=300)
+        line = fit_boundary_line(
+            segments, y_bottom=500, y_top=300,
+            side="left", width=960, config=HoughConfig(),
+        )
         self.assertIsNone(line)
+
+    def test_disjoint_negative_slopes_do_not_invert_fitted_left_boundary(self):
+        # Pooled endpoints have positive covariance despite negative segment slopes.
+        segments = np.array([[100, 300, 130, 260], [500, 500, 530, 460]], np.int32)
+        line = fit_boundary_line(
+            segments, 529, 259, side="left", width=960, config=HoughConfig(),
+        )
+        self.assertIsNotNone(line)
+        self.assertLess(line[0][0], line[1][0])
+
+    def test_consensus_excludes_spatially_separate_outlier(self):
+        segments = np.array([
+            [100, 500, 150, 400], [150, 400, 200, 300],
+            [600, 500, 650, 400],
+        ], np.int32)
+        line = fit_boundary_line(
+            segments, 500, 300, side="left", width=960, config=HoughConfig(),
+        )
+        self.assertEqual(line, ((100, 500), (200, 300)))
+
+
+class RoadPolygonTests(unittest.TestCase):
+    def test_crossing_above_road_is_trimmed_below_intersection(self):
+        polygon = create_road_polygon(((41, 529), (516, 259)), ((700, 529), (363, 259)))
+        self.assertIsNotNone(polygon)
+        self.assertGreater(polygon[1, 1], 259)
+        self.assertLess(polygon[1, 0], polygon[2, 0])
+        self.assertTrue(cv2.isContourConvex(polygon))
+
+    def test_reversed_bottom_and_disjoint_vertical_support_are_rejected(self):
+        self.assertIsNone(create_road_polygon(((700, 529), (500, 259)), ((41, 529), (300, 259))))
+        self.assertIsNone(create_road_polygon(((100, 500), (200, 400)), ((700, 300), (600, 200))))
+
+    def test_different_line_extents_use_only_common_rows(self):
+        polygon = create_road_polygon(((100, 500), (300, 300)), ((800, 450), (600, 250)))
+        np.testing.assert_array_equal(polygon, [[150, 450], [300, 300], [650, 300], [800, 450]])
 
 
 class EndToEndPipelineTests(unittest.TestCase):
@@ -157,14 +197,25 @@ class EndToEndPipelineTests(unittest.TestCase):
         area = cv2.contourArea(res.polygon)
         self.assertGreater(area, 10000.0)
 
-    def test_standard_hough_function(self):
-        edges = np.zeros((100, 100), dtype=np.uint8)
-        cv2.line(edges, (10, 10), (90, 90), 255, 2)
-        cfg = HoughConfig(threshold=10)
-        lines = detect_hough_lines_standard(edges, cfg)
-        self.assertIsInstance(lines, np.ndarray)
-        self.assertGreater(len(lines), 0)
-        self.assertEqual(lines.shape[1], 2)
+    def test_crossing_road_outputs_ordered_in_frame_boundaries(self):
+        edges = np.zeros((540, 960), dtype=np.uint8)
+        cv2.line(edges, (0, 539), (500, 259), 255, 2)
+        cv2.line(edges, (959, 539), (460, 259), 255, 2)
+        res = detect_road_boundaries(edges, HoughConfig(roi_bottom_y_ratio=1.0))
+        self.assertIsNotNone(res.polygon)
+        self.assertTrue(cv2.isContourConvex(res.polygon))
+        for bottom, top in (res.left_line, res.right_line):
+            self.assertTrue(0 <= bottom[0] < 960 and 0 <= top[0] < 960)
+            self.assertTrue(0 <= top[1] < bottom[1] < 540)
+        self.assertLess(res.left_line[0][0], res.right_line[0][0])
+        self.assertLess(res.left_line[1][0], res.right_line[1][0])
+
+    def test_empty_edges_have_no_road_prediction(self):
+        res = detect_road_boundaries(np.zeros((540, 960), np.uint8))
+        self.assertIsNone(res.left_line)
+        self.assertIsNone(res.right_line)
+        self.assertIsNone(res.polygon)
+
 
 
 if __name__ == "__main__":
