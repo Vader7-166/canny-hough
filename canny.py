@@ -64,3 +64,26 @@ def canny_edges(img, low, high, sigma, size=5, l2=True):
     smooth = gaussian_smooth(img, size, sigma)
     mag, theta = sobel_gradient(smooth, l2)
     return double_threshold_hysteresis(non_max_suppression(mag, theta), low, high)
+
+
+def gradient_percentile_thresholds(mag, high_percentile=90.0, low_ratio=0.4, region=None, min_high=8.0):
+    """Nguong kep theo phan vi do lon gradient thay vi gia tri co dinh.
+
+    Nguong (50, 150) co dinh lam anh toi / tuong phan thap gan nhu khong con canh
+    (recall bien long duong 0,09 o anh toi). Lay nguong cao bang phan vi `high_percentile`
+    cua do lon gradient trong `region` (vi du phan duoi duong chan troi), nguong thap bang
+    `low_ratio` lan nguong cao, nen luong canh on dinh khi do tuong phan thay doi.
+    """
+    values = mag[region] if region is not None else mag
+    if values.size == 0:
+        values = mag.ravel()
+    high = max(float(np.percentile(values, high_percentile)), min_high)
+    return low_ratio * high, high
+
+
+def canny_edges_auto(img, sigma=1.4, size=5, l2=True, high_percentile=90.0, low_ratio=0.4, region=None):
+    """Canny voi nguong tu dong theo phan vi gradient. Tra ve (anh canh 0/255, (low, high))."""
+    smooth = gaussian_smooth(img, size, sigma)
+    mag, theta = sobel_gradient(smooth, l2)
+    low, high = gradient_percentile_thresholds(mag, high_percentile, low_ratio, region)
+    return double_threshold_hysteresis(non_max_suppression(mag, theta), low, high), (low, high)

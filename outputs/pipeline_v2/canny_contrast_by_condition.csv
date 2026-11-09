@@ -1,0 +1,8 @@
+,density,density,density,density,recall,recall,recall,recall
+variant,"chuan hoa + (50,150)",chuan hoa + nguong phan vi,"goc: loc HSV + (50,150)","xam + (50,150)","chuan hoa + (50,150)",chuan hoa + nguong phan vi,"goc: loc HSV + (50,150)","xam + (50,150)"
+condition,,,,,,,,
+sáng,0.0523,0.0618,0.0313,0.035,0.8347,0.8608,0.6321,0.6792
+tương phản cao,0.066,0.0743,0.0262,0.0413,0.7781,0.8359,0.3676,0.5916
+tối,0.0345,0.0581,0.0102,0.0177,0.4575,0.7364,0.0879,0.214
+vừa,0.0463,0.0629,0.0189,0.0244,0.703,0.8241,0.1824,0.3787
+tat ca,0.05,0.0649,0.0206,0.0292,0.6801,0.81,0.2764,0.4418

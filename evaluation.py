@@ -99,3 +99,42 @@ def summarize_records(records: pd.DataFrame) -> pd.DataFrame:
             "mean_runtime_ms": sub["runtime_ms"].mean(),
         })
     return pd.DataFrame(rows)
+
+
+def evaluate_road_mask(pred: np.ndarray, ground_truth: np.ndarray) -> dict:
+    """Danh gia truc tiep tren mat na long duong (dung cho road_pipeline.py).
+
+    IoU, precision, recall, F1 tinh theo pixel tren toan anh (F1 la chi so chuan cua
+    KITTI Road, Fritsch et al., 2013). MAE: tai 3 hang 60/75/90% H, trung binh khoang
+    cach giua mep trai/phai cua mat na du doan va cua ground truth; hang ma GT rong
+    (vi du nap capo) duoc bo qua; neu GT co duong ma du doan rong o hang do thi anh
+    khong do duoc MAE. SR15: MAE < 15 px, mau so la toan bo anh.
+    """
+    if pred.shape != ground_truth.shape:
+        raise ValueError("Du doan va ground truth phai cung kich thuoc H x W")
+    p, g = pred > 0, ground_truth > 0
+    tp = np.count_nonzero(p & g)
+    fp = np.count_nonzero(p & ~g)
+    fn = np.count_nonzero(~p & g)
+    iou = tp / (tp + fp + fn) if tp + fp + fn else 0.0
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    height = g.shape[0]
+    errors, missing = [], False
+    for ratio in SAMPLE_ROWS:
+        y = min(height - 1, int(height * ratio))
+        gx = np.flatnonzero(g[y])
+        if len(gx) == 0:
+            continue
+        px = np.flatnonzero(p[y])
+        if len(px) == 0:
+            missing = True
+            break
+        errors.append((abs(px[0] - gx[0]) + abs(px[-1] - gx[-1])) / 2)
+    mae = float(np.mean(errors)) if errors and not missing else None
+    return {
+        "iou": float(iou), "precision": float(precision), "recall": float(recall), "f1": float(f1),
+        "mae": mae, "mae_evaluable": int(mae is not None),
+        "success_mae15": int(mae is not None and mae < SUCCESS_MAE_PX),
+    }

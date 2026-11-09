@@ -28,6 +28,7 @@ Nhóm 5 người, mỗi người một phần (xem `Phân việc.jpg`).
 ├── preprocessing.py        # P2: tiền xử lý HSV (NumPy + Pillow), có CLI batch
 ├── canny.py                # P3: Canny tự cài bằng NumPy (Gauss, Sobel, NMS, ngưỡng kép + hysteresis)
 ├── hough.py                # P4: ROI + HoughLinesP + hậu xử lý (OpenCV)
+├── road_pipeline.py        # Pipeline v2: chuẩn hóa tương phản → GrabCut → Canny → Hough, có CLI + đánh giá
 ├── tests/                  # 18 unittest: preprocessing (4), canny (5), hough (9)
 ├── Tien_xu_ly_HSV_Colab.ipynb, Canny_Colab.ipynb, Hough_Colab.ipynb
 │                           # Notebook từng phần; tự định nghĩa lại hàm (bản sao của các file .py)
@@ -88,10 +89,47 @@ Nhóm 5 người, mỗi người một phần (xem `Phân việc.jpg`).
 
 Thời gian chỉ tính bước Hough và phụ thuộc máy chạy.
 
+## Pipeline v2 (`road_pipeline.py`): kết quả cải thiện
+
+Chạy: `python road_pipeline.py` (ghi vào `outputs/pipeline_v2/`, khoảng 4–5 s/ảnh). So sánh Canny theo điều kiện sáng: `python scripts/compare_canny_contrast.py`.
+
+```
+Ảnh 960×540 ─► chuẩn hóa tương phản (ảnh tối: gamma + CLAHE trên kênh L của Lab)
+            ─► điểm tụ + mép capo (từ notebook) ─► GrabCut với ràng buộc hình học → mặt nạ lòng đường
+            ─► Canny (canny.py) trên viền mặt nạ ─► HoughLinesP + WLS (hough.py) → biên trái/phải
+```
+
+**1. Tiền xử lý cho ảnh tương phản thấp.** Ngưỡng V cố định của HSV và ngưỡng Canny cố định (50, 150) gần như xóa sạch cạnh ở ảnh tối. Bản mới chuẩn hóa độ sáng trên kênh L (giữ nguyên sắc độ a, b) và chọn ngưỡng Canny theo phân vị 90% độ lớn gradient (`canny.canny_edges_auto`). Recall cạnh trên biên lòng đường (chỉ số của Phần 3, `outputs/pipeline_v2/canny_contrast_by_condition.csv`):
+
+| Điều kiện | Gốc: lọc HSV + (50, 150) | Chuẩn hóa + (50, 150) | Chuẩn hóa + ngưỡng phân vị |
+|---|---:|---:|---:|
+| sáng | 0,632 | 0,835 | 0,861 |
+| tương phản cao | 0,368 | 0,778 | 0,836 |
+| vừa | 0,182 | 0,703 | 0,824 |
+| **tối** | **0,088** | 0,457 | **0,736** |
+| tất cả | 0,276 | 0,680 | 0,810 |
+
+Mật độ cạnh chênh giữa ảnh sáng và ảnh tối giảm từ khoảng 3 lần xuống 1,1 lần.
+
+**2. Phân vùng lòng đường thay cho khớp hai đường thẳng.** Ngay cả khi lấy hai đường thẳng khớp tốt nhất với ground truth, IoU tối đa chỉ khoảng 0,68 (ground truth là cả lòng đường, có khúc cua và xe). Vì vậy vùng đường cuối cùng là mặt nạ GrabCut (Rother et al., 2004: GMM màu + cắt đồ thị, không học sâu). Mặt nạ được khởi tạo như sau: trên đường chân trời, dưới mép capo và 3% hàng cuối là nền chắc chắn; cửa sổ ngay trước xe (luôn nằm giữa điểm tụ và capo) là mặt đường chắc chắn; nêm từ điểm tụ là "có thể là đường". Chạy 3 seed rồi bỏ phiếu đa số để tránh suy biến. Canny + Hough chạy trên viền mặt nạ để ra hai biên.
+
+**Kết quả trên 50 ảnh** (đánh giá trên mặt nạ bằng `evaluation.evaluate_road_mask`, mẫu số là toàn bộ ảnh):
+
+| Cấu hình | IoU | F1 | IoU sáng / TP cao / vừa / tối |
+|---|---:|---:|---|
+| Bản gốc (vạch HSV → Canny → Hough) | 0,174 | 0,256 | — |
+| Baseline tầm thường: tô kín dải chân trời → capo | 0,558 | — | 0,520 / 0,531 / 0,598 / 0,562 |
+| Notebook (mặt nạ S-V → Canny → Hough) | 0,559 | 0,707 | 0,516 / 0,508 / 0,618 / 0,574 |
+| **Pipeline v2** | **0,671** | **0,795** | 0,719 / 0,629 / 0,742 / 0,612 |
+
+Theo nhóm: normal 0,744 (F1 0,850), curved 0,659, adverse 0,613. 23/50 ảnh đạt IoU ≥ 0,7; ảnh kém nhất 0,366. Precision 0,807, recall 0,825. Kết quả trên nửa chẵn và nửa lẻ của tập là 0,670 và 0,673. Lưu ý: các lựa chọn thiết kế được thử trên chính 50 ảnh này, chưa có tập kiểm tra riêng.
+
+**Hạn chế còn lại:** GrabCut vẫn tràn sang vỉa hè hoặc bãi đỗ cùng màu nhựa đường (adverse_10, adverse_05, curved_10). Ảnh tối vẫn là nhóm yếu nhất (0,612). Bộ dò mép capo kế thừa từ notebook còn sai ở một số ảnh. MAE vẫn lớn (105 px), SR15 chỉ 8%. Thời gian xử lý khoảng 4–5 s/ảnh, chưa đạt thời gian thực.
+
 ## Chạy thử
 
 ```bash
-pip install numpy pillow opencv-python pandas matplotlib
+pip install -r requirements.txt
 python preprocessing.py --input dataset/images --output outputs/preprocessed_for_canny --save-intermediate
 python -m unittest discover tests
 ```
