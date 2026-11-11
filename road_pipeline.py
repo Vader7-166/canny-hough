@@ -13,13 +13,17 @@ troi -> capo" 0,552 rat it), ban nay:
    bang rang buoc hinh hoc: tren duong chan troi va duoi mep capo la nen chac chan, cua so
    ngay truoc xe la mat duong chac chan, nem tu diem tu la "co the la duong".
 4. Canny (canny.py, NumPy) tren mat na long duong -> HoughLinesP + hoi quy WLS (hough.py)
-   -> hai bien trai/phai de ve va bao cao. Vung long duong cuoi cung la mat na o buoc 3.
+   -> hai bien trai/phai de ve va bao cao.
+3b. (v3) Hau xu ly mat na GrabCut: cat theo mep capo dang parabol (chi khi do tin cay),
+   dong hinh thai ellipse 141 px de lap cho xe che, cat theo tia bien qua diem tu khi
+   tia do co doan Hough ung ho va mau hai ben lech Delta E >= 30. Tat bang refine=False.
 
 Ngoai ra `edge_map` dung Canny voi nguong theo phan vi gradient (canny.canny_edges_auto)
 tren anh da chuan hoa: tren 50 anh, recall bien long duong cua anh canh tang tu 0,277
 (ban goc) len 0,809, rieng anh toi tu 0,090 len 0,737.
 
-Chay: python road_pipeline.py  (mac dinh: dataset/images -> outputs/pipeline_v2)
+Chay: python road_pipeline.py  (mac dinh: dataset/images -> outputs/pipeline_v3;
+      --no-refine -> outputs/pipeline_v2)
 """
 
 from __future__ import annotations
@@ -82,6 +86,19 @@ class RoadConfig:
     gc_iterations: int = 5
     gc_seed: int | None = 0               # seed RNG cua OpenCV (k-means khoi tao GMM) de ket qua tai lap
     gc_votes: int = 3                     # chay GrabCut voi seed, seed+1, ... roi bo phieu da so (chong suy bien)
+    # 3b. Hau xu ly (v3); refine=False cho lai dung ket qua v2
+    refine: bool = True
+    hood_curve: bool = True               # cat mat na theo mep capo dang parabol (neu do duoc)
+    hood_edge_pct: float = 92.0           # phan vi |gy| de lay canh ngang
+    hood_road_k: float = 4.0              # dai tren canh phai giong mat duong: khoang cach Lab < k
+    hood_gap: float = 3.0                 # dai duoi canh phai khac hon dai tren it nhat chung nay
+    hood_band: tuple = (4, 14)            # dai tren/duoi canh: tu 4 den 14 px
+    hood_cover_min: float = 0.4           # duong cong phai trung canh o >= 40% so cot
+    close_size: int = 141                 # dong hinh thai ellipse (px); <= 1 de tat
+    ray_cut: bool = True                  # cat theo tia bien qua diem tu
+    ray_min_support: float = 60.0         # tong do dai doan Hough ung ho tia (px)
+    ray_min_angle: float = 62.0           # chi cat bang tia nghieng >= 62 do so voi phuong thang dung
+    ray_min_delta_e: float = 30.0         # va mau hai ben tia lech Delta E >= 30
     # Canny tren mat na + Hough
     canny_low: float = 50.0
     canny_high: float = 150.0
@@ -324,6 +341,148 @@ def segment_road(rgb: np.ndarray, vp: tuple, hood_y: int, cfg: RoadConfig = Road
 
 
 # ---------------------------------------------------------------------------
+# 3b. Hau xu ly mat na (v3): cat theo mep capo cong, dong hinh thai, cat theo tia bien
+# ---------------------------------------------------------------------------
+
+def _horizontal_edges(rgb: np.ndarray, percentile: float) -> np.ndarray:
+    """Canh ngang manh: |gy| tren phan vi `percentile` (tinh tu 55% H tro xuong), |gy| >= 1,5 |gx|,
+    cuc dai theo chieu doc."""
+    gray = cv2.GaussianBlur(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY), (5, 5), 1.2).astype(np.float32)
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    gy = np.abs(cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3))
+    thr = max(float(np.percentile(gy[int(0.55 * gray.shape[0]):], percentile)), 12.0)
+    e = (gy >= thr) & (gy >= 1.5 * np.abs(gx))
+    return e & (gy >= np.roll(gy, 1, 0)) & (gy >= np.roll(gy, -1, 0))
+
+
+def _band_mean(a: np.ndarray, y_from: int, y_to: int) -> np.ndarray:
+    """Gia tri tai (y, x) = trung binh cua a[y + y_from .. y + y_to, x]."""
+    m = cv2.blur(a, (1, y_to - y_from + 1), borderType=cv2.BORDER_REPLICATE)
+    return np.roll(m, -((y_from + y_to) // 2), axis=0)
+
+
+def detect_hood_curve(rgb: np.ndarray, vp: tuple, hood_y: int, cfg: RoadConfig = RoadConfig()) -> np.ndarray | None:
+    """Mep capo dang parabol y(x) = y0 + a u^2 + t u, u = (x - W/2) / (W/2). Tra ve y theo tung cot, hoac None.
+
+    Chi giu canh ngang ma dai ngay phia tren giong mau mat duong (khoang cach Lab toi cua so mau < hood_road_k)
+    va dai phia duoi khac hon it nhat hood_gap. Duong cong duoc chon la duong cong phu nhieu canh nhat;
+    neu khong co duong cong nao phu du hood_cover_min so cot thi khong cat gi (giu nguyen v2).
+    """
+    h, w = rgb.shape[:2]
+    seed = np.zeros((h, w), bool)
+    rows = seed_rows(vp, hood_y if hood_y < h - 1 else h, h, cfg)
+    seed[rows, int(cfg.gc_seed_cols[0] * w):int(cfg.gc_seed_cols[1] * w)] = True
+    dist = np.minimum(lab_distance(rgb, seed), 30).astype(np.float32)
+    b0, b1 = cfg.hood_band
+    above, below = _band_mean(dist, -b1, -b0), _band_mean(dist, b0, b1)
+    edges = _horizontal_edges(rgb, cfg.hood_edge_pct) & (above < cfg.hood_road_k) & (below > above + cfg.hood_gap)
+    y_min = rows.stop + 15
+    edges[:y_min] = False
+    edges = cv2.dilate(edges.astype(np.uint8), np.ones((7, 1), np.uint8)) > 0     # dung sai +-3 px
+
+    xs = np.arange(4, w, 8)
+    u = (xs - w / 2) / (w / 2)
+    y0s = np.arange(max(int(0.55 * h), y_min), int(0.985 * h), 2)
+    best = None
+    for a in range(0, 101, 10):
+        for t in range(-48, 49, 8):
+            yi = np.round(y0s[:, None] + a * u[None] ** 2 + t * u[None]).astype(int)
+            valid = (yi < h) & (yi > y_min)
+            hit = edges[np.clip(yi, 0, h - 1), xs[None]] & valid
+            cover = hit.sum(1) / np.maximum(valid.sum(1), 1)
+            cover[valid.mean(1) < 0.6] = 0
+            i = int(np.argmax(cover)) if len(cover) else 0
+            if len(cover) and cover[i] >= cfg.hood_cover_min and (best is None or cover[i] > best[0]):
+                best = (cover[i], y0s[i], a, t)
+    if best is None:
+        return None
+    _, y0, a, t = best
+    uu = (np.arange(w) - w / 2) / (w / 2)
+    return y0 + a * uu ** 2 + t * uu
+
+
+def _vp_rays(edges: np.ndarray, vp: tuple, hood_y: int, min_support: float):
+    """Tia qua diem tu duoc cac doan P-Hough (gan diem tu) ung ho; tra ve [(goc phi, do ung ho)], phi = 0: thang xuong."""
+    xv, yv = vp
+    e = edges.copy()
+    e[:int(yv) + 6] = 0
+    e[max(hood_y - 3, 0):] = 0
+    segs = cv2.HoughLinesP(e, 1, np.pi / 180, 25, minLineLength=35, maxLineGap=8)
+    if segs is None:
+        return []
+    x1, y1, x2, y2 = segs.reshape(-1, 4).astype(np.float64).T
+    dx, dy = x2 - x1, y2 - y1
+    length = np.hypot(dx, dy)
+    dist = np.abs(dx * (y1 - yv) - dy * (x1 - xv)) / length
+    phi = np.degrees(np.arctan2((x1 + x2) / 2 - xv, (y1 + y2) / 2 - yv))
+    keep = (dist < 22.0) & (np.abs(phi) < 86) & (np.abs(phi) > 4)
+    phi, length = phi[keep], length[keep]
+    step = 1.5
+    bins = np.arange(-87, 87 + step, step)
+    hist = np.convolve(np.histogram(phi, bins=bins, weights=length)[0], [0.5, 1, 0.5], mode="same")
+    rays = []
+    for i in range(len(hist)):
+        if hist[i] >= min_support and hist[i] >= hist[max(i - 1, 0)] and hist[i] >= hist[min(i + 1, len(hist) - 1)]:
+            sel = (phi >= bins[i] - step) & (phi < bins[i + 1] + step)
+            rays.append((float(np.average(phi[sel], weights=length[sel])), float(hist[i])))
+    return rays
+
+
+def _ray_color_step(lab: np.ndarray, vp: tuple, hood_y: int, phi: float) -> float:
+    """Do lech mau Lab (Delta E giua trung vi) cua hai dai rong 6..22 px nam hai ben tia."""
+    h, w = lab.shape[:2]
+    ys = np.arange(int(vp[1] + 0.06 * h), min(hood_y - 4, h - 1))
+    xs = vp[0] + np.tan(np.radians(phi)) * (ys - vp[1])
+    c = max(np.cos(np.radians(phi)), 0.2)
+    sides = ([], [])
+    for d in range(6, 23, 2):
+        for sgn, bucket in ((-1, sides[0]), (1, sides[1])):
+            xx = np.round(xs + sgn * d / c).astype(int)
+            ok = (xx >= 0) & (xx < w)
+            bucket.append(lab[ys[ok], xx[ok]])
+    a, b = np.concatenate(sides[0]), np.concatenate(sides[1])
+    if len(a) < 30 or len(b) < 30:
+        return 0.0
+    return float(np.linalg.norm(np.median(a, 0) - np.median(b, 0)))
+
+
+def refine_mask(road: np.ndarray, rgb: np.ndarray, vp: tuple, hood_y: int, edges: np.ndarray,
+                cfg: RoadConfig = RoadConfig()) -> np.ndarray:
+    """Hau xu ly mat na GrabCut (bool H x W) tren anh da chuan hoa `rgb`, `edges` = Canny nguong tu dong."""
+    h, w = road.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    out = road.copy()
+    if cfg.hood_curve:
+        curve = detect_hood_curve(rgb, vp, hood_y, cfg)
+        if curve is not None:
+            out &= yy <= curve[None] - 1
+    else:
+        curve = None
+    if cfg.close_size > 1 and out.any():
+        # Lap cac lo/khuyet do xe che, nhung khong cho mat na vuot qua mep capo / hang thap nhat da co
+        k = cfg.close_size
+        padded = cv2.copyMakeBorder(out.astype(np.uint8), k, k, k, k, cv2.BORDER_CONSTANT, value=0)
+        closed = cv2.morphologyEx(padded, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        closed = closed[k:-k, k:-k] > 0
+        bottom = int(np.flatnonzero(out.any(1)).max())
+        closed &= yy <= bottom
+        if curve is not None:
+            closed &= yy <= curve[None] - 1
+        out = closed
+    if cfg.ray_cut:
+        lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+        rays = _vp_rays(edges, vp, hood_y, cfg.ray_min_support)
+        for sign in (-1, 1):
+            cand = [phi for phi, _ in rays if np.sign(phi) == sign and abs(phi) >= cfg.ray_min_angle
+                    and _ray_color_step(lab, vp, hood_y, phi) >= cfg.ray_min_delta_e]
+            if cand:
+                phi = min(cand, key=abs)                  # tia trong cung (gan tam duong nhat)
+                x_ray = vp[0] + np.tan(np.radians(phi)) * (yy - vp[1])
+                out &= (xx >= x_ray) if phi < 0 else (xx <= x_ray)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 4. Canny tren mat na -> Hough -> hai bien
 # ---------------------------------------------------------------------------
 
@@ -376,9 +535,12 @@ def run_pipeline(rgb: np.ndarray, cfg: RoadConfig = RoadConfig(), with_edge_map:
     enhanced, applied = normalize_contrast(resized, cfg)
     vp, hood_y, _ = road_prior(resized, cfg)
     road = segment_road(enhanced, vp, hood_y, cfg)
+    auto_edges = edge_map(enhanced, vp) if (with_edge_map or (cfg.refine and cfg.ray_cut)) else None
+    if cfg.refine:
+        road = refine_mask(road, enhanced, vp, hood_y, auto_edges, cfg)
     edges, left, right = boundary_lines(road, vp, hood_y, cfg)
     return RoadResult(resized, enhanced, applied, vp, hood_y, (road * 255).astype(np.uint8), edges, left, right,
-                      edge_map(enhanced, vp) if with_edge_map else None)
+                      auto_edges if with_edge_map else None)
 
 
 def draw_result(result: RoadResult) -> np.ndarray:
@@ -455,10 +617,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Pipeline v2: chuan hoa tuong phan -> phan vung -> Canny -> Hough")
     parser.add_argument("--input", default="dataset/images")
     parser.add_argument("--gt", default="dataset/ground_truth")
-    parser.add_argument("--output", default="outputs/pipeline_v2")
+    parser.add_argument("--output", default=None, help="Mac dinh outputs/pipeline_v3 (outputs/pipeline_v2 neu --no-refine)")
     parser.add_argument("--edge-maps", action="store_true", help="Luu them anh canh Canny nguong tu dong")
+    parser.add_argument("--no-refine", action="store_true", help="Tat hau xu ly 3b (ket qua v2)")
     args = parser.parse_args()
-    process_dataset(args.input, args.gt, args.output, save_edge_maps=args.edge_maps)
+    cfg = RoadConfig(refine=not args.no_refine)
+    output = args.output or ("outputs/pipeline_v2" if args.no_refine else "outputs/pipeline_v3")
+    process_dataset(args.input, args.gt, output, cfg=cfg, save_edge_maps=args.edge_maps)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import numpy as np
 
 from canny import canny_edges, canny_edges_auto, gradient_percentile_thresholds
 from evaluation import evaluate_road_mask
-from road_pipeline import RoadConfig, normalize_contrast, segment_road
+from road_pipeline import RoadConfig, detect_hood_curve, normalize_contrast, refine_mask, segment_road
 
 
 class AdaptiveCannyTests(unittest.TestCase):
@@ -70,6 +70,55 @@ class SegmentRoadTests(unittest.TestCase):
         rgb[road > 0] = (95, 95, 100)
         pred = segment_road(rgb, (480.0, 245.0), h - 1, RoadConfig(gc_bottom_ratio=0.0, gc_color_k=5.0))
         self.assertGreater(evaluate_road_mask(pred.astype(np.uint8), road)["iou"], 0.9)
+
+
+def _scene_with_hood(hood: bool):
+    """Duong xam tren nen co; neu hood=True them nap capo toi mau, mep tren la cung parabol."""
+    h, w = 540, 960
+    rgb = np.zeros((h, w, 3), np.uint8)
+    rgb[:] = (40, 140, 40)
+    rgb[: int(0.45 * h)] = (120, 170, 230)
+    road = np.zeros((h, w), np.uint8)
+    cv2.fillPoly(road, [np.array([[60, h - 1], [440, 250], [520, 250], [900, h - 1]], np.int32)], 1)
+    rgb[road > 0] = (95, 95, 100)
+    curve = None
+    if hood:
+        u = (np.arange(w) - w / 2) / (w / 2)
+        curve = 470 + 40 * u ** 2                               # cao nhat o giua (y = 470), thap dan ra hai mep
+        below = np.mgrid[0:h, 0:w][0] >= curve[None]
+        rgb[below] = (25, 30, 45)                               # capo xanh den
+    rng = np.random.default_rng(2)
+    rgb = np.clip(rgb.astype(int) + rng.integers(-5, 6, rgb.shape), 0, 255).astype(np.uint8)
+    return rgb, curve
+
+
+class HoodCurveTests(unittest.TestCase):
+    def test_parabolic_hood_edge_is_found(self):
+        rgb, curve = _scene_with_hood(True)
+        found = detect_hood_curve(rgb, (480.0, 245.0), 539)
+        self.assertIsNotNone(found)
+        cols = slice(200, 760)                                  # phan giua: mep capo nam duoi mat duong
+        self.assertLess(float(np.abs(found[cols] - curve[cols]).max()), 6.0)
+
+    def test_no_hood_means_no_cut(self):
+        rgb, _ = _scene_with_hood(False)
+        self.assertIsNone(detect_hood_curve(rgb, (480.0, 245.0), 539))
+
+    def test_refine_cuts_mask_below_hood(self):
+        rgb, curve = _scene_with_hood(True)
+        road = np.zeros(rgb.shape[:2], bool)
+        road[300:, 100:860] = True                              # mat na GrabCut lan ca xuong capo
+        cfg = RoadConfig(close_size=0, ray_cut=False)
+        out = refine_mask(road, rgb, (480.0, 245.0), 539, None, cfg)
+        self.assertFalse(out[480:, 470:490].any())              # duoi mep capo o giua: bi cat
+        self.assertTrue(out[300:460, 470:490].all())            # tren mep capo: giu nguyen
+
+    def test_refine_disabled_returns_same_mask(self):
+        rgb, _ = _scene_with_hood(True)
+        road = np.zeros(rgb.shape[:2], bool)
+        road[300:, 100:860] = True
+        cfg = RoadConfig(hood_curve=False, close_size=0, ray_cut=False)
+        self.assertTrue(np.array_equal(refine_mask(road, rgb, (480.0, 245.0), 539, None, cfg), road))
 
 
 class EvaluateRoadMaskTests(unittest.TestCase):
