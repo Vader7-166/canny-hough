@@ -3,7 +3,7 @@ import unittest
 import cv2
 import numpy as np
 
-from canny import canny_edges, canny_edges_auto, gradient_percentile_thresholds
+from canny import canny_cv2, canny_cv2_auto, canny_edges, canny_edges_auto, gradient_percentile_thresholds
 from evaluation import evaluate_road_mask
 from road_pipeline import RoadConfig, detect_hood_curve, normalize_contrast, refine_mask, segment_road
 
@@ -26,6 +26,23 @@ class AdaptiveCannyTests(unittest.TestCase):
         edges, (low, high) = canny_edges_auto(img)
         self.assertGreater(int((edges[:, 18:23] > 0).sum()), 30)
         self.assertLess(high, 150)
+
+    def test_cv2_auto_finds_low_contrast_step(self):
+        img = np.full((40, 40), 20, np.uint8)
+        img[:, 20:] = 32
+        self.assertEqual(int(canny_cv2(img, 50, 150).max()), 0)
+        edges, (low, high) = canny_cv2_auto(img)
+        self.assertGreater(int((edges[:, 18:23] > 0).sum()), 30)
+        self.assertLess(high, 150)
+
+    def test_cv2_matches_numpy_on_step_image(self):
+        img = np.zeros((40, 40), np.uint8)
+        img[:, 20:] = 200
+        # Hai ban co the lech 1 px o diem co gradient bang nhau (cach NMS chon diem hoa) -> dung sai 1 px
+        a, b = canny_edges(img, 50, 150, 1.4) > 0, canny_cv2(img, 50, 150, 1.4) > 0
+        grow = lambda m: cv2.dilate(m.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0  # noqa: E731
+        self.assertEqual(int(a.sum()), int(b.sum()))
+        self.assertTrue((b <= grow(a)).all() and (a <= grow(b)).all())
 
 
 class NormalizeContrastTests(unittest.TestCase):

@@ -12,13 +12,13 @@ troi -> capo" 0,552 rat it), ban nay:
 3. Phan vung long duong bang GrabCut (Rother et al., 2004): GMM mau + cat do thi, khoi tao
    bang rang buoc hinh hoc: tren duong chan troi va duoi mep capo la nen chac chan, cua so
    ngay truoc xe la mat duong chac chan, nem tu diem tu la "co the la duong".
-4. Canny (canny.py, NumPy) tren mat na long duong -> HoughLinesP + hoi quy WLS (hough.py)
+4. Canny (cv2.Canny qua canny.canny_cv2) tren mat na long duong -> HoughLinesP + hoi quy WLS (hough.py)
    -> hai bien trai/phai de ve va bao cao.
 3b. (v3) Hau xu ly mat na GrabCut: cat theo mep capo dang parabol (chi khi do tin cay),
    dong hinh thai ellipse 141 px de lap cho xe che, cat theo tia bien qua diem tu khi
    tia do co doan Hough ung ho va mau hai ben lech Delta E >= 30. Tat bang refine=False.
 
-Ngoai ra `edge_map` dung Canny voi nguong theo phan vi gradient (canny.canny_edges_auto)
+Ngoai ra `edge_map` dung cv2.Canny voi nguong theo phan vi gradient (canny.canny_cv2_auto)
 tren anh da chuan hoa: tren 50 anh, recall bien long duong cua anh canh tang tu 0,277
 (ban goc) len 0,809, rieng anh toi tu 0,090 len 0,737.
 
@@ -37,7 +37,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
-from canny import canny_edges, canny_edges_auto
+from canny import canny_cv2, canny_cv2_auto
 from hough import HoughConfig, detect_hough_lines_p, fit_boundary_line, split_left_right_segments
 from preprocessing import SUPPORTED_EXTENSIONS, resize_rgb, rgb_to_hsv_opencv
 
@@ -498,7 +498,7 @@ def boundary_lines(mask: np.ndarray, vp: tuple, hood_y: int, cfg: RoadConfig = R
     contours, _ = cv2.findContours((mask > 0).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     filled = np.zeros((h, w), np.uint8)
     cv2.drawContours(filled, contours, -1, 255, thickness=cv2.FILLED)
-    edges = canny_edges(cv2.GaussianBlur(filled, (5, 5), 1.2), cfg.canny_low, cfg.canny_high, cfg.canny_sigma)
+    edges = canny_cv2(cv2.GaussianBlur(filled, (5, 5), 1.2), cfg.canny_low, cfg.canny_high, cfg.canny_sigma)
     y_top = int(np.clip(vp[1] + 0.05 * h, 0.30 * h, 0.70 * h))
     y_bottom = max(min(h - 1, hood_y - 10), y_top + 40)
     near = {"left": np.zeros((h, w), bool), "right": np.zeros((h, w), bool)}
@@ -526,7 +526,7 @@ def edge_map(rgb_enhanced: np.ndarray, vp: tuple) -> np.ndarray:
     gray = cv2.cvtColor(rgb_enhanced, cv2.COLOR_RGB2GRAY)
     region = np.zeros(gray.shape, bool)
     region[int(vp[1]):] = True
-    edges, _ = canny_edges_auto(gray, region=region)
+    edges, _ = canny_cv2_auto(gray, region=region)
     return edges
 
 

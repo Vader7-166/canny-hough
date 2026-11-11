@@ -16,7 +16,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from canny import canny_edges, canny_edges_auto  # noqa: E402
+from canny import canny_cv2, canny_cv2_auto  # noqa: E402
 from road_pipeline import _read_rgb, normalize_contrast, road_prior  # noqa: E402
 from preprocessing import resize_rgb  # noqa: E402
 
@@ -49,10 +49,10 @@ def main():
         gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
         enhanced = cv2.cvtColor(normalize_contrast(rgb, force=True)[0], cv2.COLOR_RGB2GRAY)
         variants = {
-            "goc: loc HSV + (50,150)": canny_edges(hsv_input, 50, 150, 1.4),
-            "xam + (50,150)": canny_edges(gray, 50, 150, 1.4),
-            "chuan hoa + (50,150)": canny_edges(enhanced, 50, 150, 1.4),
-            "chuan hoa + nguong phan vi": canny_edges_auto(enhanced, region=region)[0],
+            "goc: loc HSV + (50,150)": canny_cv2(hsv_input, 50, 150, 1.4),
+            "xam + (50,150)": canny_cv2(gray, 50, 150, 1.4),
+            "chuan hoa + (50,150)": canny_cv2(enhanced, 50, 150, 1.4),
+            "chuan hoa + nguong phan vi": canny_cv2_auto(enhanced, region=region)[0],
         }
         for name, edges in variants.items():
             r, d = recall_density(edges, b)
