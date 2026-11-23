@@ -28,7 +28,7 @@ Nhóm 5 người, mỗi người một phần (xem `Phân việc.jpg`).
 ├── preprocessing.py        # P2: tiền xử lý HSV (NumPy + Pillow), có CLI batch
 ├── canny.py                # P3: Canny tự cài bằng NumPy (Gauss, Sobel, NMS, ngưỡng kép + hysteresis)
 ├── hough.py                # P4: ROI + HoughLinesP + hậu xử lý (OpenCV)
-├── road_pipeline.py        # Pipeline v2: chuẩn hóa tương phản → GrabCut → Canny → Hough, có CLI + đánh giá
+├── road_pipeline.py        # Pipeline v2/v3: chuẩn hóa tương phản → GrabCut → hậu xử lý (v3) → Canny → Hough, có CLI + đánh giá
 ├── tests/                  # 18 unittest: preprocessing (4), canny (5), hough (9)
 ├── Tien_xu_ly_HSV_Colab.ipynb, Canny_Colab.ipynb, Hough_Colab.ipynb
 │                           # Notebook từng phần; tự định nghĩa lại hàm (bản sao của các file .py)
@@ -91,7 +91,7 @@ Thời gian chỉ tính bước Hough và phụ thuộc máy chạy.
 
 ## Pipeline v2 (`road_pipeline.py`): kết quả cải thiện
 
-Chạy: `python road_pipeline.py` (ghi vào `outputs/pipeline_v2/`, khoảng 4–5 s/ảnh). So sánh Canny theo điều kiện sáng: `python scripts/compare_canny_contrast.py`.
+Chạy: `python road_pipeline.py` (ghi vào `outputs/pipeline_v2/`, khoảng 4 s/ảnh). So sánh Canny theo điều kiện sáng: `python scripts/compare_canny_contrast.py`.
 
 ```
 Ảnh 960×540 ─► chuẩn hóa tương phản (ảnh tối: gamma + CLAHE trên kênh L của Lab)
@@ -124,7 +124,30 @@ Mật độ cạnh chênh giữa ảnh sáng và ảnh tối giảm từ khoản
 
 Theo nhóm: normal 0,744 (F1 0,850), curved 0,659, adverse 0,613. 23/50 ảnh đạt IoU ≥ 0,7; ảnh kém nhất 0,366. Precision 0,807, recall 0,825. Kết quả trên nửa chẵn và nửa lẻ của tập là 0,670 và 0,673. Lưu ý: các lựa chọn thiết kế được thử trên chính 50 ảnh này, chưa có tập kiểm tra riêng.
 
-**Hạn chế còn lại:** GrabCut vẫn tràn sang vỉa hè hoặc bãi đỗ cùng màu nhựa đường (adverse_10, adverse_05, curved_10). Ảnh tối vẫn là nhóm yếu nhất (0,612). Bộ dò mép capo kế thừa từ notebook còn sai ở một số ảnh. MAE vẫn lớn (105 px), SR15 chỉ 8%. Thời gian xử lý khoảng 4–5 s/ảnh, chưa đạt thời gian thực.
+**Hạn chế còn lại:** GrabCut vẫn tràn sang vỉa hè hoặc bãi đỗ cùng màu nhựa đường (adverse_10, adverse_05, curved_10). Ảnh tối vẫn là nhóm yếu nhất (0,612). Bộ dò mép capo kế thừa từ notebook còn sai ở một số ảnh. MAE vẫn lớn (105 px), SR15 chỉ 8%. Thời gian xử lý khoảng 4 s/ảnh, chưa đạt thời gian thực.
+
+## Pipeline v3: hậu xử lý mặt nạ (bước 3b)
+
+Chạy: `python road_pipeline.py` (mặc định từ nay ghi vào `outputs/pipeline_v3/`; `--no-refine` cho lại đúng v2). Ablation: `python scripts/ablation_pipeline_v3.py`.
+
+Sau GrabCut, mặt nạ được sửa ba bước (`refine_mask`, bật/tắt từng bước trong `RoadConfig`):
+
+1. **Cắt theo mép capo dạng parabol** (`detect_hood_curve`). Chỉ giữ cạnh ngang mạnh mà dải ngay phía trên giống màu mặt đường (khoảng cách Lab tới cửa sổ mẫu < 4) và dải phía dưới khác hơn ít nhất 3. Sau đó khớp đường cong y = y0 + a·u² + t·u phủ nhiều cạnh nhất. Nếu không có đường cong nào phủ ≥ 40% số cột thì không cắt. Bộ dò chỉ nhận 12/50 ảnh nhưng không làm ảnh nào tệ đi.
+2. **Đóng hình thái** bằng ellipse 141 px để lấp chỗ xe che, không cho mặt nạ vượt quá mép capo hoặc hàng thấp nhất sẵn có.
+3. **Cắt theo tia biên qua điểm tụ.** Mỗi bên chỉ cắt khi có tia nghiêng ≥ 62° được các đoạn Hough (trên ảnh cạnh Canny ngưỡng tự động) ủng hộ ≥ 60 px và màu hai bên tia lệch ΔE ≥ 30.
+
+Mọi ngưỡng được chọn trên nửa "dev" (ảnh chỉ số chẵn) rồi kiểm tra trên nửa "val" (chỉ số lẻ).
+
+| Cấu hình | IoU | dev / val | F1 | Precision / Recall | MAE (px) | IoU sáng / TP cao / vừa / tối |
+|---|---:|---|---:|---|---:|---|
+| Pipeline v2 | 0,671 | 0,670 / 0,673 | 0,795 | 0,807 / 0,825 | 105,2 | 0,719 / 0,629 / 0,742 / 0,612 |
+| **Pipeline v3** | **0,689** | 0,688 / 0,689 | **0,807** | 0,821 / 0,829 | **96,8** | 0,769 / 0,635 / 0,760 / 0,624 |
+
+Theo nhóm: normal 0,771, curved 0,669, adverse 0,626. 27/50 ảnh đạt IoU ≥ 0,7 (v2: 23). Số ảnh tìm được cả hai biên tăng từ 27 lên 34. SR15 tăng từ 8% lên 10%. So với v2 có 32 ảnh tăng và 9 ảnh giảm (lệch > 0,005); chỉ curved_11 giảm đáng kể (−0,089). Thời gian chạy khoảng 4,5 s/ảnh (v2: 3,7 s), phần tăng thêm chủ yếu do tìm đường cong capo.
+
+Ablation (`outputs/pipeline_v3/ablation_summary.csv`, cùng mặt nạ GrabCut): chỉ cắt capo 0,678, chỉ đóng hình thái 0,676, chỉ cắt theo tia 0,675. Ghép capo + đóng được 0,684, đủ cả ba được 0,689. Bỏ capo còn 0,680, bỏ đóng còn 0,682.
+
+Đã thử nhưng không giữ: đưa đường cong capo vào khởi tạo GrabCut (nền chắc chắn) cho IoU 0,671, không hơn v2. Đổi không gian màu (Lab, Luv, HSV), làm mượt trước (mean-shift, bilateral, median), thêm kênh kết cấu, đổi hình dạng hạt giống hay độ rộng nêm đều cho 0,61–0,667. Watershed theo marker cho ≤ 0,50.
 
 ## Chạy thử
 
