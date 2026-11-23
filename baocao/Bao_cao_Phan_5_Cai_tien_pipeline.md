@@ -11,7 +11,8 @@ Báo cáo này trình bày các thay đổi so với pipeline hiện có của n
 | Bản gốc: lọc vạch HSV → Canny (50, 150) → Hough | 0,174 | 0,256 | Báo cáo tổng hợp |
 | Baseline tầm thường: tô kín dải từ chân trời tới capo | 0,558 | – | Không dùng biên trái/phải |
 | Notebook `Pipeline_HSV_Canny_Hough`: mặt nạ màu S-V → Canny → Hough | 0,559 | 0,707 | |
-| **Pipeline v2 (báo cáo này)** | **0,671** | **0,795** | Precision 0,807, recall 0,825 |
+| Pipeline v2 | 0,671 | 0,795 | Precision 0,807, recall 0,825 |
+| **Pipeline v3 (v2 + hậu xử lý mặt nạ, mục 7.5)** | **0,689** | **0,807** | Precision 0,821, recall 0,829 |
 
 *Bảng 1. Kết quả trên 50 ảnh, đánh giá trên mặt nạ lòng đường, mẫu số là toàn bộ ảnh.*
 
@@ -21,6 +22,7 @@ Các điểm chính:
 - Ở bước Canny, tỉ lệ điểm trên biên lòng đường có cạnh đi qua tăng từ 0,276 lên 0,810. Riêng ảnh tối tăng từ 0,088 lên 0,736.
 - Nhóm normal đạt IoU 0,744 (F1 0,850). Nhóm adverse vẫn thấp nhất với 0,613.
 - Mục tiêu IoU 0,7 chưa đạt trên toàn tập: 23/50 ảnh đạt IoU ≥ 0,7.
+- Bản v3 thêm bước hậu xử lý mặt nạ (cắt theo mép capo cong, đóng hình thái, cắt theo tia biên) và đưa IoU lên 0,689 (+0,018). Số ảnh đạt IoU ≥ 0,7 tăng lên 27/50; ngưỡng chọn trên nửa dev, nửa val cho kết quả tương đương (0,688 / 0,689).
 
 ## 2. Hiện trạng trước khi cải tiến
 
@@ -178,6 +180,29 @@ Các kiểu lỗi chính nhìn từ Hình 4:
 - **Lấn vào nắp capo** khi bộ dò mép capo (kế thừa từ notebook) sai, ví dụ curved_05.
 - **Lấn lên cây và trời** ở ảnh ngược sáng (adverse_15).
 
+### 7.5 Cải tiến 4 (pipeline v3): hậu xử lý mặt nạ
+
+Phân tích lỗi của v2 cho thấy phần tràn sang hai bên chiếm khoảng 15% diện tích hợp, phần bỏ sót khoảng 15%, phần lấn xuống capo 1,4–1,8%. Nếu biết đúng đường cong đáy của ground truth (mép capo) và cắt mặt nạ v2 theo đó, IoU lên 0,730. Đây là cận trên, không phải kết quả thật. Bản v3 thêm hàm `refine_mask` sau GrabCut với ba bước:
+
+1. **Cắt theo mép capo dạng parabol** (`detect_hood_curve`). Chỉ giữ cạnh ngang mạnh (|g_y| trên phân vị 92%, |g_y| ≥ 1,5|g_x|) mà dải 4–14 px phía trên giống màu mặt đường (khoảng cách Lab tới cửa sổ mẫu < 4), còn dải phía dưới khác hơn ít nhất 3. Sau đó khớp đường cong y = y0 + a·u² + t·u phủ nhiều cạnh nhất. Không có đường cong nào phủ ≥ 40% số cột thì không cắt. Bộ dò chỉ nhận 12/50 ảnh, nhưng không ảnh nào bị tệ đi. Bản đầu không có phép thử màu bám nhầm vào cạnh ngang trên mặt đường (bóng đổ, vạch sơn) và làm IoU giảm.
+2. **Đóng hình thái** bằng ellipse 141 px để lấp chỗ xe che, không cho mặt nạ vượt quá mép capo hoặc hàng thấp nhất sẵn có.
+3. **Cắt theo tia biên qua điểm tụ.** Ảnh cạnh Canny ngưỡng tự động → HoughLinesP → các đoạn gần điểm tụ bỏ phiếu theo góc. Mỗi bên chỉ cắt bằng tia trong cùng có góc ≥ 62°, được ủng hộ ≥ 60 px và có màu hai bên lệch ΔE ≥ 30. Đây là cách đưa Canny + Hough trở lại việc tạo vùng đường (xem mục 9).
+
+Mọi ngưỡng được chọn trên nửa "dev" (ảnh chỉ số chẵn), nửa "val" (chỉ số lẻ) chỉ dùng để kiểm tra.
+
+| Cấu hình | IoU | IoU dev / val | F1 | Precision | Recall | IoU normal / curved / adverse | Ảnh giảm > 0,02 so với v2 |
+|---|---:|---|---:|---:|---:|---|---:|
+| v2 | 0,671 | 0,670 / 0,673 | 0,795 | 0,807 | 0,825 | 0,744 / 0,659 / 0,613 | – |
+| Chỉ cắt capo | 0,678 | 0,677 / 0,679 | 0,800 | 0,815 | 0,825 | 0,758 / 0,667 / 0,613 | 0 |
+| Chỉ đóng hình thái | 0,676 | 0,674 / 0,679 | 0,799 | 0,799 | 0,840 | 0,744 / 0,667 / 0,621 | 1 |
+| Chỉ cắt theo tia | 0,675 | 0,674 / 0,676 | 0,797 | 0,819 | 0,816 | 0,755 / 0,653 / 0,616 | 3 |
+| Capo + đóng | 0,684 | 0,683 / 0,685 | 0,804 | 0,808 | 0,840 | 0,758 / 0,675 / 0,623 | 1 |
+| **v3 (capo + đóng + tia)** | **0,689** | 0,688 / 0,689 | **0,807** | 0,821 | 0,829 | 0,771 / 0,669 / 0,626 | 3 |
+
+*Bảng 7b. Ablation của bước hậu xử lý, cùng một mặt nạ GrabCut. Nguồn: `outputs/pipeline_v3/ablation_summary.csv`, sinh bằng `scripts/ablation_pipeline_v3.py`.*
+
+Chạy đầy đủ (`outputs/pipeline_v3/summary.csv`): MAE giảm từ 105,2 xuống 96,8 px; số ảnh tìm được cả hai biên tăng từ 27 lên 34; SR15 tăng từ 8% lên 10%. IoU theo điều kiện sáng: sáng 0,769, tương phản cao 0,635, vừa 0,760, tối 0,624. So với v2 có 32 ảnh tăng và 9 ảnh giảm (lệch > 0,005). Ảnh tăng nhiều nhất là normal_11 (+0,23); chỉ curved_11 giảm đáng kể (−0,09). Thời gian chạy tăng từ 3,7 lên 4,5 s/ảnh (sau khi chuyển sang `cv2.Canny`).
+
 ## 8. Các hướng đã thử nhưng không giữ lại
 
 Các con số dưới đây đo ở cấu hình trung gian, chỉ dùng để so sánh tương đối.
@@ -192,6 +217,11 @@ Các con số dưới đây đo ở cấu hình trung gian, chỉ dùng để so
 | Dùng đoạn Hough dài không phải vạch sơn làm "tường chắn" cho GrabCut | Không thay đổi | Mép bó vỉa hiếm khi liền mạch nên không tách được vùng tràn |
 | Cắt vùng tràn theo tia Hough, chọn tia mà phần bị cắt khác màu mẫu | IoU giảm | Cắt nhầm vào vùng bóng đổ |
 | CLAHE cho mọi ảnh trước GrabCut | IoU giảm ở ảnh sáng | CLAHE làm thay đổi màu cục bộ, nên chỉ áp cho ảnh tối |
+| GrabCut trên Lab / Luv / HSV, làm mượt trước (mean-shift, bilateral, median), thêm kênh kết cấu | IoU 0,61–0,667 | Không hơn BGR gốc (0,671) |
+| Đổi hình hạt giống (hình thang), độ rộng nêm (2 hoặc 4,5), 10 vòng lặp, lọc màu k = 6 | IoU 0,618–0,666 | Không hơn cấu hình v2 |
+| Watershed theo marker thay GrabCut | IoU ≤ 0,50 | Rò qua cạnh yếu |
+| Vùng gradient thấp nối với cửa sổ mẫu ("basin") | 0,574 với ngưỡng cố định; 0,671 nếu chọn ngưỡng theo ground truth | Chưa có cách chọn ngưỡng tự động, dù tốt hơn hẳn ở vài ảnh (normal_08: 0,88) |
+| Đường cong capo làm nền chắc chắn khi khởi tạo GrabCut (v3) | IoU 0,671 | Không hơn; chỉ dùng để cắt mặt nạ cuối |
 
 *Bảng 6. Các hướng đã thử.*
 
@@ -200,13 +230,13 @@ Các con số dưới đây đo ở cấu hình trung gian, chỉ dùng để so
 - **Chưa đạt IoU 0,7 trên toàn tập.** Normal đạt 0,744; curved và adverse còn 0,659 và 0,613.
 - **Vai trò của Canny + Hough đã thay đổi.** Vùng đường giờ do GrabCut quyết định; Canny + Hough chỉ xác định hai biên từ viền mặt nạ. Ảnh cạnh cải thiện ở mục 4 chưa được đưa vào việc tạo vùng đường. Nếu đề tài yêu cầu Canny + Hough là trung tâm thì cần cân nhắc lại hướng này.
 - **Không có tập kiểm tra riêng.** Các lựa chọn thiết kế được thử trên chính 50 ảnh. Để kiểm tra khớp quá mức, nhóm tách tập thành nửa chẵn và nửa lẻ theo thứ tự ảnh: IoU lần lượt 0,670 và 0,673 (notebook: 0,565 và 0,553). Kết quả này chưa thay thế được một tập kiểm tra thật.
-- **Chậm.** Khoảng 4–5 s/ảnh trên CPU, chủ yếu do 3 lần GrabCut. Chưa đạt mục tiêu dưới 50 ms/khung của bài báo Belhadri.
+- **Chậm.** Khoảng 4 s/ảnh trên CPU, chủ yếu do 3 lần GrabCut. Chưa đạt mục tiêu dưới 50 ms/khung của bài báo Belhadri.
 - **MAE còn lớn** (105 px) và SR15 chỉ 8%.
 
 ## 10. Hướng tiếp theo
 
 1. Đưa ảnh cạnh đã cải thiện (mục 4) vào GrabCut, ví dụ làm tăng chi phí cắt dọc theo cạnh Canny mạnh, để chặn vùng tràn sang vỉa hè.
-2. Dò mép capo tốt hơn. Nếu biết đúng mép capo, IoU của GrabCut tăng khoảng +0,05 (đo bằng ground truth).
+2. Dò mép capo tốt hơn nữa. Bộ dò v3 mới nhận 12/50 ảnh; nếu biết đúng mép capo, IoU tăng tới 0,730 (đo bằng ground truth).
 3. Thử mô hình màu bất biến bóng đổ (illuminant-invariant, Alvarez và López, 2011) cho các ảnh có tương phản cao.
 4. Chia tập validation và test trước khi chỉnh thêm tham số.
 5. Cập nhật DAG Airflow và notebook để dùng `road_pipeline.py`. Hiện cả hai vẫn chạy pipeline cũ.
@@ -215,11 +245,13 @@ Các con số dưới đây đo ở cấu hình trung gian, chỉ dùng để so
 
 ```bash
 pip install -r requirements.txt
-python road_pipeline.py --edge-maps            # chạy 50 ảnh, đánh giá, ghi outputs/pipeline_v2/
+python road_pipeline.py --edge-maps            # chạy 50 ảnh, đánh giá, ghi outputs/pipeline_v3/
+python road_pipeline.py --no-refine --edge-maps   # bản v2, ghi outputs/pipeline_v2/
 python scripts/compare_canny_contrast.py       # Bảng 2
 python scripts/ablation_pipeline_v2.py         # Bảng 7
+python scripts/ablation_pipeline_v3.py         # Bảng 7b (ghi outputs/pipeline_v3/)
 python scripts/figures_pipeline_v2.py          # Hình 1–4
-python -m pytest tests                         # 38 test
+python -m pytest tests                         # 42 test
 ```
 
 | File | Nội dung |
@@ -228,6 +260,7 @@ python -m pytest tests                         # 38 test
 | `canny.py` | Thêm `gradient_percentile_thresholds`, `canny_edges_auto` |
 | `evaluation.py` | Thêm `evaluate_road_mask` (IoU, precision, recall, F1, MAE, SR15 trên mặt nạ) |
 | `tests/test_road_pipeline.py` | Test ngưỡng thích nghi, chuẩn hóa tương phản, GrabCut trên ảnh tổng hợp, đánh giá mặt nạ |
+| `outputs/pipeline_v3/` | `road_mask/`, `overlay/`, `mask_edges/`, `results.csv`, `summary.csv`, `ablation*.csv` của bản v3 |
 | `outputs/pipeline_v2/` | `road_mask/`, `overlay/`, `mask_edges/`, `edge_map/`, `results.csv`, `summary.csv`, `ablation*.csv`, `canny_contrast_by_condition.csv`, `figures/` |
 
 ## Tài liệu tham khảo
